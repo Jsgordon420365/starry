@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Star Map Explorer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #000;
+        }
+        
+        .loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 24px;
+            z-index: 10000;
+            flex-direction: column;
+        }
+        
+        .loader-spinner {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            border-top: 4px solid #fff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        canvas {
+            display: block;
+            cursor: grab;
+            touch-action: none;
+        }
+        
+        canvas:active {
+            cursor: grabbing;
+        }
+        
+        .controls {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+        }
+        
+        .control-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 12px 20px;
+            cursor: pointer;
+            border-radius: 8px;
+            font-size: 16px;
+            backdrop-filter: blur(10px);
+            transition: all 0.3s;
+        }
+        
+        .control-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
+        }
+        
+        .control-btn:active {
+            transform: scale(0.95);
+        }
+        
+        .control-btn.active {
+            background: rgba(255, 235, 59, 0.3);
+            border-color: #ffeb3b;
+        }
+        
+        .zoom-controls {
+            display: flex;
+            gap: 5px;
+        }
+        
+        .info-panel {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            max-width: 350px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 15px;
+            border-radius: 8px;
+            backdrop-filter: blur(10px);
+            z-index: 1000;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: all 0.3s;
+            pointer-events: none;
+        }
+        
+        .info-panel.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .info-panel h3 {
+            margin-bottom: 8px;
+            color: #ffeb3b;
+            font-size: 18px;
+        }
+        
+        .info-panel p {
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 5px;
+        }
+        
+        .alignment-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.5);
+            pointer-events: none;
+            z-index: 900;
+            display: none;
+        }
+        
+        .alignment-overlay.active {
+            display: block;
+        }
+        
+        .alignment-info {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            border: 2px solid #ffeb3b;
+            font-family: monospace;
+            font-size: 14px;
+            text-align: center;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="loader" id="loader">
+        <div class="loader-spinner"></div>
+        <div>Loading Star Map...</div>
+    </div>
+    
+    <canvas id="starCanvas"></canvas>
+    
+    <div class="controls">
+        <div class="zoom-controls">
+            <button class="control-btn" id="zoomInBtn">+</button>
+            <button class="control-btn" id="zoomOutBtn">−</button>
+        </div>
+        <button class="control-btn" id="resetBtn">Reset</button>
+        <button class="control-btn" id="alignBtn">Align</button>
+        <button class="control-btn" id="orionBtn">Orion ✓</button>
+        <button class="control-btn" id="taurusBtn">Taurus ✓</button>
+        <button class="control-btn" id="geminiBtn">Gemini ✓</button>
+        <button class="control-btn" id="replacePhotoBtn">Replace Photo</button>
+    </div>
+    
+    <div class="info-panel" id="infoPanel"></div>
+    
+    <div class="alignment-overlay" id="alignmentOverlay">
+        <div class="alignment-info" id="alignmentInfo"></div>
+    </div>
+    
+    <input type="file" id="fileInput" accept="image/*">
+    
+    <script>
+        // Configuration constants
+        const HIT_RADIUS_MIN = 10;
+        const HIT_RADIUS_BASE = 15;
+        const STAR_SIZE_MIN = 3;
+        const STAR_SIZE_BASE = 8;
+        
+        // Base64 placeholder for night sky (minimal dark gradient)
+        const BACKDROP_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAYAAADPfd1WAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEgAACxIB0t1+/AAAABZ0RVh0Q3JlYXRpb24gVGltZQAwMS8xNi8yNpl9pxQAAAAcdEVYdFNvZnR3YXJlAEFkb2JlIEZpcmV3b3JrcyBDUzVxteM2AAABRmlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSCwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAzCDJwMdgzqCUmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsgscyG/7BVLP8ytjPr/X1730SJM9SiAKyW1OBlI/wHi9OSCohIGBsYYIFu5vKQAxO4AskWKgI4CsueA2OkQ9gYQOwnCPgJWExLkDGTfALIFkjMSgWYwvgCydZKQxNOR2FB7QYDXx10h1CckyDHc08WVgHtJBiWpFSUg2jm/oLIoMz2jRMERGEqpCp55yXo6CkYGhpYMDKAwh6j+fAMcloxiHAixAjEGBosZQMGHCLF4oB+2yzEw8PchxNSA/hXwYmA4uK8gsSgR7gDGbyzFacZGEDb3dgYG1mn//38OZ2Bg12Rg+Hv9///f2////7uMgYH5FgPDgW8AEPRhmJCm9HoAAEAASURBVHgB7L0JuGXXWd77r7XnPZ9TVd2ae+5uS61uS7ZlyZY8ybING2PAGAhgIIEQMiQhXAgkkEsgkMDNBQIkQAgGMsR2wLZky5Yly7JaUvesakk9V1dXdVXVOWfvPaz7rV17n1OnpVJLVqqus0t7Puspne7Tc8/fWu//vd8aDRk+CBAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAE";
+        
+        // Star data with constellation membership
+        const STAR_DATA = [
+            // Orion
+            { id: 1, name: "Betelgeuse", x: 0.25, y: 0.3, magnitude: 0.5, constellation: "Orion", myth: "Red supergiant marking Orion's shoulder. One of the largest known stars." },
+            { id: 2, name: "Rigel", x: 0.28, y: 0.55, magnitude: 0.12, constellation: "Orion", myth: "Blue supergiant marking Orion's foot. The brightest star in Orion." },
+            { id: 3, name: "Bellatrix", x: 0.21, y: 0.35, magnitude: 1.64, constellation: "Orion", myth: "Marking Orion's other shoulder, the Amazon warrior star." },
+            { id: 4, name: "Alnitak", x: 0.245, y: 0.42, magnitude: 1.77, constellation: "Orion", myth: "Easternmost star in Orion's Belt, represents the hunter's belt." },
+            { id: 5, name: "Alnilam", x: 0.25, y: 0.42, magnitude: 1.69, constellation: "Orion", myth: "Middle star of Orion's Belt, a blue supergiant." },
+            { id: 6, name: "Mintaka", x: 0.255, y: 0.42, magnitude: 2.23, constellation: "Orion", myth: "Westernmost star in Orion's Belt, close to celestial equator." },
+            { id: 7, name: "Saiph", x: 0.22, y: 0.55, magnitude: 2.06, constellation: "Orion", myth: "Marking Orion's other foot, the sword of the hunter." },
+            
+            // Taurus
+            { id: 8, name: "Aldebaran", x: 0.35, y: 0.4, magnitude: 0.85, constellation: "Taurus", myth: "The eye of the bull, a red giant star, follower of the Pleiades." },
+            { id: 9, name: "Elnath", x: 0.38, y: 0.32, magnitude: 1.65, constellation: "Taurus", myth: "The northern horn of the bull, marking the tip." },
+            { id: 10, name: "Alcyone", x: 0.42, y: 0.35, magnitude: 2.87, constellation: "Taurus", myth: "Brightest star of the Pleiades cluster, the Seven Sisters." },
+            { id: 11, name: "Ain", x: 0.33, y: 0.42, magnitude: 3.53, constellation: "Taurus", myth: "Part of the Hyades cluster, representing the bull's face." },
+            
+            // Gemini
+            { id: 12, name: "Pollux", x: 0.5, y: 0.35, magnitude: 1.14, constellation: "Gemini", myth: "The immortal twin, son of Zeus, an orange giant star." },
+            { id: 13, name: "Castor", x: 0.48, y: 0.32, magnitude: 1.58, constellation: "Gemini", myth: "The mortal twin, actually a six-star system." },
+            { id: 14, name: "Alhena", x: 0.52, y: 0.42, magnitude: 1.93, constellation: "Gemini", myth: "Marking the foot of Pollux in the constellation." },
+            { id: 15, name: "Wasat", x: 0.49, y: 0.38, magnitude: 3.53, constellation: "Gemini", myth: "The middle star, lying near the ecliptic." },
+            
+            // Additional stars for background
+            { id: 16, name: "Polaris", x: 0.5, y: 0.1, magnitude: 1.98, constellation: "Ursa Minor", myth: "The North Star, marking the celestial north pole." },
+            { id: 17, name: "Sirius", x: 0.15, y: 0.6, magnitude: -1.46, constellation: "Canis Major", myth: "The brightest star in the night sky, the Dog Star." },
+            { id: 18, name: "Vega", x: 0.7, y: 0.25, magnitude: 0.03, constellation: "Lyra", myth: "Part of the Summer Triangle, a blue-white star." },
+            { id: 19, name: "Arcturus", x: 0.65, y: 0.5, magnitude: -0.05, constellation: "Boötes", myth: "The guardian of the bear, fourth brightest star." },
+            { id: 20, name: "Capella", x: 0.4, y: 0.2, magnitude: 0.08, constellation: "Auriga", myth: "The she-goat star, actually a four-star system." },
+        ];
+        
+        // Constellation line connections (indices into STAR_DATA)
+        // Orion: 0=Betelgeuse, 1=Rigel, 2=Bellatrix, 3=Alnitak, 4=Alnilam, 5=Mintaka, 6=Saiph
+        // Taurus: 7=Aldebaran, 8=Elnath, 9=Alcyone, 10=Ain
+        // Gemini: 11=Pollux, 12=Castor, 13=Alhena, 14=Wasat
+        const CONSTELLATION_LINES = {
+            Orion: [
+                [0, 2], [0, 4], [2, 3], [3, 4], [4, 5], [5, 1], [1, 6], [3, 6] // Body and belt
+            ],
+            Taurus: [
+                [7, 8], [7, 10], [8, 9] // Bull's head and horns
+            ],
+            Gemini: [
+                [11, 12], [11, 14], [12, 13], [13, 14] // Twin figures
+            ]
+        };
+        
+        // Application state
+        const state = {
+            backdropImage: null,
+            transform: { x: 0, y: 0, scale: 1 },
+            hoveredStar: null,
+            alignmentMode: false,
+            silhouettes: {
+                Orion: true,
+                Taurus: true,
+                Gemini: true
+            },
+            drag: { isDragging: false, lastX: 0, lastY: 0 },
+            pinch: { isPinching: false, lastDistance: 0 }
+        };
+        
+        // DOM elements
+        const canvas = document.getElementById('starCanvas');
+        const ctx = canvas.getContext('2d');
+        const loader = document.getElementById('loader');
+        const infoPanel = document.getElementById('infoPanel');
+        const alignmentOverlay = document.getElementById('alignmentOverlay');
+        const alignmentInfo = document.getElementById('alignmentInfo');
+        
+        // Initialize canvas size
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            render();
+        }
+        
+        // Load backdrop image
+        function loadBackdrop() {
+            const img = new Image();
+            img.onload = () => {
+                state.backdropImage = img;
+                loader.style.display = 'none';
+                loadSavedState();
+                render();
+            };
+            img.onerror = () => {
+                // Create fallback gradient backdrop
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = 2000;
+                tempCanvas.height = 1500;
+                const tempCtx = tempCanvas.getContext('2d');
+                
+                const gradient = tempCtx.createRadialGradient(1000, 750, 100, 1000, 750, 1500);
+                gradient.addColorStop(0, '#1a237e');
+                gradient.addColorStop(0.5, '#0d1b4d');
+                gradient.addColorStop(1, '#000000');
+                tempCtx.fillStyle = gradient;
+                tempCtx.fillRect(0, 0, 2000, 1500);
+                
+                // Add background stars
+                tempCtx.fillStyle = 'white';
+                for (let i = 0; i < 300; i++) {
+                    const x = Math.random() * 2000;
+                    const y = Math.random() * 1500;
+                    const size = Math.random() * 2;
+                    tempCtx.beginPath();
+                    tempCtx.arc(x, y, size, 0, Math.PI * 2);
+                    tempCtx.fill();
+                }
+                
+                const fallbackImg = new Image();
+                fallbackImg.onload = () => {
+                    state.backdropImage = fallbackImg;
+                    loader.style.display = 'none';
+                    loadSavedState();
+                    render();
+                };
+                fallbackImg.src = tempCanvas.toDataURL();
+            };
+            img.src = BACKDROP_DATA_URL;
+        }
+        
+        // Save state to localStorage
+        function saveState() {
+            const saveData = {
+                transform: state.transform,
+                silhouettes: state.silhouettes
+            };
+            localStorage.setItem('starMapState', JSON.stringify(saveData));
+        }
+        
+        // Load state from localStorage
+        function loadSavedState() {
+            const saved = localStorage.getItem('starMapState');
+            if (saved) {
+                try {
+                    const data = JSON.parse(saved);
+                    if (data.transform) state.transform = data.transform;
+                    if (data.silhouettes) state.silhouettes = data.silhouettes;
+                    updateSilhouetteButtons();
+                } catch (e) {
+                    console.error('Failed to load saved state', e);
+                }
+            }
+        }
+        
+        // Draw ghost silhouette for constellation
+        function drawSilhouette(constellation) {
+            if (!state.silhouettes[constellation]) return;
+            
+            const stars = STAR_DATA.filter(s => s.constellation === constellation);
+            if (stars.length === 0) return;
+            
+            ctx.save();
+            ctx.globalAlpha = 0.15;
+            
+            if (constellation === 'Orion') {
+                ctx.fillStyle = '#4fc3f7';
+                const betelgeuse = stars.find(s => s.name === 'Betelgeuse');
+                const rigel = stars.find(s => s.name === 'Rigel');
+                
+                if (betelgeuse && rigel) {
+                    const x1 = betelgeuse.x * canvas.width * state.transform.scale + state.transform.x;
+                    const y1 = betelgeuse.y * canvas.height * state.transform.scale + state.transform.y;
+                    const x2 = rigel.x * canvas.width * state.transform.scale + state.transform.x;
+                    const y2 = rigel.y * canvas.height * state.transform.scale + state.transform.y;
+                    
+                    const centerX = (x1 + x2) / 2;
+                    const centerY = (y1 + y2) / 2;
+                    const height = Math.abs(y2 - y1);
+                    const width = height * 0.6;
+                    
+                    ctx.beginPath();
+                    ctx.ellipse(centerX, y1 - 20, width * 0.3, height * 0.15, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.beginPath();
+                    ctx.ellipse(centerX, centerY, width * 0.35, height * 0.35, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } else if (constellation === 'Taurus') {
+                ctx.fillStyle = '#ff9800';
+                const aldebaran = stars.find(s => s.name === 'Aldebaran');
+                
+                if (aldebaran) {
+                    const x = aldebaran.x * canvas.width * state.transform.scale + state.transform.x;
+                    const y = aldebaran.y * canvas.height * state.transform.scale + state.transform.y;
+                    
+                    ctx.beginPath();
+                    ctx.ellipse(x, y, 60 * state.transform.scale, 80 * state.transform.scale, 0, 0, Math.PI * 2);
+                    ctx.fill();
+                    
+                    ctx.beginPath();
+                    ctx.arc(x - 40 * state.transform.scale, y - 60 * state.transform.scale, 30 * state.transform.scale, 0, Math.PI * 2);
+                    ctx.arc(x + 40 * state.transform.scale, y - 60 * state.transform.scale, 30 * state.transform.scale, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } else if (constellation === 'Gemini') {
+                ctx.fillStyle = '#ffeb3b';
+                const pollux = stars.find(s => s.name === 'Pollux');
+                const castor = stars.find(s => s.name === 'Castor');
+                
+                if (pollux && castor) {
+                    [pollux, castor].forEach(star => {
+                        const x = star.x * canvas.width * state.transform.scale + state.transform.x;
+                        const y = star.y * canvas.height * state.transform.scale + state.transform.y;
+                        
+                        ctx.beginPath();
+                        ctx.ellipse(x, y, 25 * state.transform.scale, 30 * state.transform.scale, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                        
+                        ctx.beginPath();
+                        ctx.ellipse(x, y + 50 * state.transform.scale, 20 * state.transform.scale, 40 * state.transform.scale, 0, 0, Math.PI * 2);
+                        ctx.fill();
+                    });
+                }
+            }
+            
+            ctx.restore();
+        }
+        
+        // Main render function
+        function render() {
+            if (!state.backdropImage) return;
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Draw backdrop
+            const scale = state.transform.scale;
+            const imgWidth = canvas.width * scale;
+            const imgHeight = canvas.height * scale;
+            ctx.drawImage(state.backdropImage, state.transform.x, state.transform.y, imgWidth, imgHeight);
+            
+            // Draw ghost silhouettes
+            drawSilhouette('Orion');
+            drawSilhouette('Taurus');
+            drawSilhouette('Gemini');
+            
+            // Draw constellation lines
+            ctx.strokeStyle = 'rgba(100, 200, 255, 0.4)';
+            ctx.lineWidth = 2;
+            Object.entries(CONSTELLATION_LINES).forEach(([constName, lines]) => {
+                lines.forEach(([startIdx, endIdx]) => {
+                    const start = STAR_DATA[startIdx];
+                    const end = STAR_DATA[endIdx];
+                    
+                    const x1 = start.x * canvas.width * scale + state.transform.x;
+                    const y1 = start.y * canvas.height * scale + state.transform.y;
+                    const x2 = end.x * canvas.width * scale + state.transform.x;
+                    const y2 = end.y * canvas.height * scale + state.transform.y;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                });
+            });
+            
+            // Draw stars
+            STAR_DATA.forEach(star => {
+                const starX = star.x * canvas.width * scale + state.transform.x;
+                const starY = star.y * canvas.height * scale + state.transform.y;
+                
+                if (starX < -50 || starX > canvas.width + 50 || starY < -50 || starY > canvas.height + 50) {
+                    return;
+                }
+                
+                const isHovered = state.hoveredStar && state.hoveredStar.id === star.id;
+                const baseSize = Math.max(STAR_SIZE_MIN, STAR_SIZE_BASE - star.magnitude) * scale;
+                const size = isHovered ? baseSize * 1.5 : baseSize;
+                
+                // Draw glow
+                const gradient = ctx.createRadialGradient(starX, starY, 0, starX, starY, size * 3);
+                gradient.addColorStop(0, 'rgba(255, 255, 255, 0.8)');
+                gradient.addColorStop(0.5, 'rgba(200, 220, 255, 0.3)');
+                gradient.addColorStop(1, 'rgba(200, 220, 255, 0)');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(starX, starY, size * 3, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw star core
+                ctx.fillStyle = isHovered ? '#ffeb3b' : 'white';
+                ctx.beginPath();
+                ctx.arc(starX, starY, size, 0, Math.PI * 2);
+                ctx.fill();
+                
+                // Draw highlight ring
+                if (isHovered) {
+                    ctx.strokeStyle = '#ffeb3b';
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(starX, starY, size * 2, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            });
+            
+            // Draw alignment mode overlay
+            if (state.alignmentMode) {
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255, 235, 59, 0.5)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([5, 5]);
+                
+                const gridSize = 100;
+                for (let i = 0; i < canvas.width; i += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(i, 0);
+                    ctx.lineTo(i, canvas.height);
+                    ctx.stroke();
+                }
+                for (let i = 0; i < canvas.height; i += gridSize) {
+                    ctx.beginPath();
+                    ctx.moveTo(0, i);
+                    ctx.lineTo(canvas.width, i);
+                    ctx.stroke();
+                }
+                
+                ctx.setLineDash([]);
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ffeb3b';
+                ctx.beginPath();
+                ctx.moveTo(canvas.width / 2 - 20, canvas.height / 2);
+                ctx.lineTo(canvas.width / 2 + 20, canvas.height / 2);
+                ctx.moveTo(canvas.width / 2, canvas.height / 2 - 20);
+                ctx.lineTo(canvas.width / 2, canvas.height / 2 + 20);
+                ctx.stroke();
+                
+                ctx.restore();
+                
+                alignmentInfo.innerHTML = `
+                    <div>X: ${Math.round(state.transform.x)}px</div>
+                    <div>Y: ${Math.round(state.transform.y)}px</div>
+                    <div>Scale: ${state.transform.scale.toFixed(2)}x</div>
+                `;
+            }
+        }
+        
+        // Hit test for stars
+        function hitTestStar(x, y) {
+            const scale = state.transform.scale;
+            
+            for (let star of STAR_DATA) {
+                const starX = star.x * canvas.width * scale + state.transform.x;
+                const starY = star.y * canvas.height * scale + state.transform.y;
+                const hitRadius = Math.max(HIT_RADIUS_MIN, HIT_RADIUS_BASE - star.magnitude) * scale;
+                
+                const distance = Math.sqrt((x - starX) ** 2 + (y - starY) ** 2);
+                if (distance < hitRadius) {
+                    return star;
+                }
+            }
+            
+            return null;
+        }
+        
+        // Update info panel
+        function updateInfoPanel() {
+            if (state.hoveredStar) {
+                infoPanel.classList.add('visible');
+                infoPanel.innerHTML = `
+                    <h3>${state.hoveredStar.name}</h3>
+                    <p><strong>Constellation:</strong> ${state.hoveredStar.constellation}</p>
+                    <p><strong>Magnitude:</strong> ${state.hoveredStar.magnitude.toFixed(2)}</p>
+                    <p>${state.hoveredStar.myth}</p>
+                `;
+            } else {
+                infoPanel.classList.remove('visible');
+            }
+        }
+        
+        // Mouse event handlers
+        canvas.addEventListener('mousedown', (e) => {
+            state.drag.isDragging = true;
+            state.drag.lastX = e.clientX;
+            state.drag.lastY = e.clientY;
+        });
+        
+        canvas.addEventListener('mousemove', (e) => {
+            const star = hitTestStar(e.clientX, e.clientY);
+            state.hoveredStar = star;
+            updateInfoPanel();
+            
+            if (state.drag.isDragging) {
+                const dx = e.clientX - state.drag.lastX;
+                const dy = e.clientY - state.drag.lastY;
+                
+                state.transform.x += dx;
+                state.transform.y += dy;
+                
+                state.drag.lastX = e.clientX;
+                state.drag.lastY = e.clientY;
+                
+                render();
+                saveState();
+            } else {
+                render();
+            }
+        });
+        
+        canvas.addEventListener('mouseup', () => {
+            state.drag.isDragging = false;
+        });
+        
+        canvas.addEventListener('mouseleave', () => {
+            state.drag.isDragging = false;
+        });
+        
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(0.5, Math.min(5, state.transform.scale * delta));
+            
+            const scaleRatio = newScale / state.transform.scale;
+            state.transform.x = mouseX - (mouseX - state.transform.x) * scaleRatio;
+            state.transform.y = mouseY - (mouseY - state.transform.y) * scaleRatio;
+            state.transform.scale = newScale;
+            
+            render();
+            saveState();
+        });
+        
+        // Touch event handlers
+        canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 2) {
+                state.pinch.isPinching = true;
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                state.pinch.lastDistance = Math.sqrt(dx * dx + dy * dy);
+            } else if (e.touches.length === 1) {
+                state.drag.isDragging = true;
+                state.drag.lastX = e.touches[0].clientX;
+                state.drag.lastY = e.touches[0].clientY;
+            }
+        });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            
+            if (state.pinch.isPinching && e.touches.length === 2) {
+                const dx = e.touches[0].clientX - e.touches[1].clientX;
+                const dy = e.touches[0].clientY - e.touches[1].clientY;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                const delta = distance / state.pinch.lastDistance;
+                state.transform.scale = Math.max(0.5, Math.min(5, state.transform.scale * delta));
+                
+                state.pinch.lastDistance = distance;
+                render();
+                saveState();
+            } else if (state.drag.isDragging && e.touches.length === 1) {
+                const dx = e.touches[0].clientX - state.drag.lastX;
+                const dy = e.touches[0].clientY - state.drag.lastY;
+                
+                state.transform.x += dx;
+                state.transform.y += dy;
+                
+                state.drag.lastX = e.touches[0].clientX;
+                state.drag.lastY = e.touches[0].clientY;
+                
+                render();
+                saveState();
+            }
+        });
+        
+        canvas.addEventListener('touchend', () => {
+            state.drag.isDragging = false;
+            state.pinch.isPinching = false;
+        });
+        
+        // Control button handlers
+        document.getElementById('zoomInBtn').addEventListener('click', () => {
+            state.transform.scale = Math.min(5, state.transform.scale * 1.2);
+            render();
+            saveState();
+        });
+        
+        document.getElementById('zoomOutBtn').addEventListener('click', () => {
+            state.transform.scale = Math.max(0.5, state.transform.scale / 1.2);
+            render();
+            saveState();
+        });
+        
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            state.transform = { x: 0, y: 0, scale: 1 };
+            render();
+            saveState();
+        });
+        
+        document.getElementById('alignBtn').addEventListener('click', () => {
+            state.alignmentMode = !state.alignmentMode;
+            document.getElementById('alignBtn').classList.toggle('active', state.alignmentMode);
+            alignmentOverlay.classList.toggle('active', state.alignmentMode);
+            render();
+        });
+        
+        function updateSilhouetteButtons() {
+            document.getElementById('orionBtn').textContent = 'Orion ' + (state.silhouettes.Orion ? '✓' : '');
+            document.getElementById('taurusBtn').textContent = 'Taurus ' + (state.silhouettes.Taurus ? '✓' : '');
+            document.getElementById('geminiBtn').textContent = 'Gemini ' + (state.silhouettes.Gemini ? '✓' : '');
+        }
+        
+        document.getElementById('orionBtn').addEventListener('click', () => {
+            state.silhouettes.Orion = !state.silhouettes.Orion;
+            updateSilhouetteButtons();
+            render();
+            saveState();
+        });
+        
+        document.getElementById('taurusBtn').addEventListener('click', () => {
+            state.silhouettes.Taurus = !state.silhouettes.Taurus;
+            updateSilhouetteButtons();
+            render();
+            saveState();
+        });
+        
+        document.getElementById('geminiBtn').addEventListener('click', () => {
+            state.silhouettes.Gemini = !state.silhouettes.Gemini;
+            updateSilhouetteButtons();
+            render();
+            saveState();
+        });
+        
+        document.getElementById('replacePhotoBtn').addEventListener('click', () => {
+            document.getElementById('fileInput').click();
+        });
+        
+        document.getElementById('fileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        state.backdropImage = img;
+                        render();
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        
+        // Initialize
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+        loadBackdrop();
+    </script>
+</body>
+</html>
