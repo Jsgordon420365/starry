@@ -200,6 +200,12 @@
     <input type="file" id="fileInput" accept="image/*">
     
     <script>
+        // Configuration constants
+        const HIT_RADIUS_MIN = 10;
+        const HIT_RADIUS_BASE = 15;
+        const STAR_SIZE_MIN = 3;
+        const STAR_SIZE_BASE = 8;
+        
         // Base64 placeholder for night sky (minimal dark gradient)
         const BACKDROP_DATA_URL = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAABQAAAALQCAYAAADPfd1WAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAALEgAACxIB0t1+/AAAABZ0RVh0Q3JlYXRpb24gVGltZQAwMS8xNi8yNpl9pxQAAAAcdEVYdFNvZnR3YXJlAEFkb2JlIEZpcmV3b3JrcyBDUzVxteM2AAABRmlDQ1BJQ0MgUHJvZmlsZQAAKJFjYGASSCwoyGFhYGDIzSspCnJ3UoiIjFJgf8LAzCDJwMdgzqCUmFxc4BgQ4ANUwgCjUcG3awyMIPqyLsgscyG/7BVLP8ytjPr/X1730SJM9SiAKyW1OBlI/wHi9OSCohIGBsYYIFu5vKQAxO4AskWKgI4CsueA2OkQ9gYQOwnCPgJWExLkDGTfALIFkjMSgWYwvgCydZKQxNOR2FB7QYDXx10h1CckyDHc08WVgHtJBiWpFSUg2jm/oLIoMz2jRMERGEqpCp55yXo6CkYGhpYMDKAwh6j+fAMcloxiHAixAjEGBosZQMGHCLF4oB+2yzEw8PchxNSA/hXwYmA4uK8gsSgR7gDGbyzFacZGEDb3dgYG1mn//38OZ2Bg12Rg+Hv9///f2////7uMgYH5FgPDgW8AEPRhmJCm9HoAAEAASURBVHgB7L0JuGXXWd77r7XnPZ9TVd2ae+5uS61uS7ZlyZY8ybING2PAGAhgIIEQMiQhXAgkkEsgkMDNBQIkQAgGMsR2wLZky5Yly7JaUvesakk9V1dXdVXVOWfvPaz7rV17n1OnpVJLVqqus0t7Puspne7Tc8/fWu//vd8aDRk+CBAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAEQRAE";
         
@@ -235,15 +241,18 @@
         ];
         
         // Constellation line connections (indices into STAR_DATA)
+        // Orion: 0=Betelgeuse, 1=Rigel, 2=Bellatrix, 3=Alnitak, 4=Alnilam, 5=Mintaka, 6=Saiph
+        // Taurus: 7=Aldebaran, 8=Elnath, 9=Alcyone, 10=Ain
+        // Gemini: 11=Pollux, 12=Castor, 13=Alhena, 14=Wasat
         const CONSTELLATION_LINES = {
             Orion: [
-                [0, 2], [0, 4], [2, 3], [3, 4], [4, 5], [5, 1], [1, 6], [3, 6]
+                [0, 2], [0, 4], [2, 3], [3, 4], [4, 5], [5, 1], [1, 6], [3, 6] // Body and belt
             ],
             Taurus: [
-                [7, 8], [7, 10], [8, 9]
+                [7, 8], [7, 10], [8, 9] // Bull's head and horns
             ],
             Gemini: [
-                [11, 12], [11, 14], [12, 13], [13, 14]
+                [11, 12], [11, 14], [12, 13], [13, 14] // Twin figures
             ]
         };
         
@@ -468,8 +477,8 @@
                     return;
                 }
                 
-                const isHovered = state.hoveredStar?.id === star.id;
-                const baseSize = Math.max(3, 8 - star.magnitude) * scale;
+                const isHovered = state.hoveredStar && state.hoveredStar.id === star.id;
+                const baseSize = Math.max(STAR_SIZE_MIN, STAR_SIZE_BASE - star.magnitude) * scale;
                 const size = isHovered ? baseSize * 1.5 : baseSize;
                 
                 // Draw glow
@@ -547,7 +556,7 @@
             for (let star of STAR_DATA) {
                 const starX = star.x * canvas.width * scale + state.transform.x;
                 const starY = star.y * canvas.height * scale + state.transform.y;
-                const hitRadius = Math.max(10, 15 - star.magnitude) * scale;
+                const hitRadius = Math.max(HIT_RADIUS_MIN, HIT_RADIUS_BASE - star.magnitude) * scale;
                 
                 const distance = Math.sqrt((x - starX) ** 2 + (y - starY) ** 2);
                 if (distance < hitRadius) {
