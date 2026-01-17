@@ -144,6 +144,10 @@
             font-size: 13px;
             line-height: 1.4;
         }
+        .tooltip p:first-of-type {
+            font-weight: 600;
+            color: #aaa;
+        }
         .tooltip p:last-child {
             margin-bottom: 0;
         }
@@ -160,6 +164,24 @@
             top: 0;
             left: 0;
         }
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: #fff;
+            padding: 12px 24px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            z-index: 300;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .toast.visible {
+            opacity: 1;
+        }
     </style>
 </head>
 <body>
@@ -175,6 +197,8 @@
         <p id="tooltipConstellation"></p>
         <p id="tooltipMyth"></p>
     </div>
+
+    <div id="toast" class="toast"></div>
 
     <div class="controls">
         <div class="zoom-controls">
@@ -286,8 +310,8 @@
                 backdropImage = img;
                 hideLoader();
             };
-            img.onerror = function() {
-                console.error('Failed to load backdrop image');
+            img.onerror = function(error) {
+                console.error('Failed to load backdrop image. Source:', src, 'Error:', error);
                 hideLoader();
             };
             img.src = src;
@@ -303,19 +327,38 @@
             if (saved) {
                 try {
                     const settings = JSON.parse(saved);
-                    scale = settings.scale || 1;
-                    offsetX = settings.offsetX || 0;
-                    offsetY = settings.offsetY || 0;
-                    updateAlignmentInputs();
+                    // Validate settings
+                    if (typeof settings === 'object' && settings !== null) {
+                        if (typeof settings.scale === 'number' && settings.scale >= 0.1 && settings.scale <= 5) {
+                            scale = settings.scale;
+                        }
+                        if (typeof settings.offsetX === 'number' && !isNaN(settings.offsetX)) {
+                            offsetX = settings.offsetX;
+                        }
+                        if (typeof settings.offsetY === 'number' && !isNaN(settings.offsetY)) {
+                            offsetY = settings.offsetY;
+                        }
+                        updateAlignmentInputs();
+                    }
                 } catch (e) {
-                    console.error('Failed to load alignment settings', e);
+                    console.error('Failed to load alignment settings:', e);
+                    localStorage.removeItem('starMapAlignment');
                 }
             }
         }
 
+        function showToast(message, duration = 3000) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('visible');
+            setTimeout(() => {
+                toast.classList.remove('visible');
+            }, duration);
+        }
+
         function saveAlignmentSettings() {
             localStorage.setItem('starMapAlignment', JSON.stringify({ scale, offsetX, offsetY }));
-            alert('Alignment settings saved!');
+            showToast('Alignment settings saved!');
         }
 
         function resetAlignment() {
@@ -500,7 +543,7 @@
             const tooltipMyth = document.getElementById('tooltipMyth');
             
             tooltipName.textContent = star.name;
-            tooltipConstellation.innerHTML = '<strong>Constellation:</strong> ' + star.constellation;
+            tooltipConstellation.textContent = 'Constellation: ' + star.constellation;
             tooltipMyth.textContent = star.myth;
             
             tooltip.style.left = x + 'px';
